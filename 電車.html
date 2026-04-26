@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>305系 車内案内表示器 - 運転台連動版</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@700;900&family=Noto+Sans+SC:wght@700;900&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background-color: #fff; font-family: "Hiragino Sans", "Meiryo", sans-serif; overflow: hidden; width: 100vw; height: 100vh; }
+        #lcd { width: 100%; height: 100%; display: flex; flex-direction: column; }
+
+        /* 上部エリア */
+        .top-gray-zone {
+            height: 38%; background: linear-gradient(to bottom, #eeeeee 0%, #cccccc 100%);
+            padding: 0 3%; position: relative; display: flex; flex-direction: column; justify-content: center;
+        }
+        
+        .lang-container { transition: opacity 0.5s ease-in-out; width: 100%; }
+        .header-top-row { display: flex; align-items: baseline; gap: 2.5vw; margin-bottom: 0.5vw; }
+        .type { font-size: 2.6vw; font-weight: bold; color: #333; }
+        .dest-main { font-size: 3.5vw; font-weight: bold; color: #000; }
+
+        .header-bottom-row { display: flex; align-items: baseline; width: 68%; min-height: 7vw; }
+        .status { font-size: 3vw; font-weight: bold; color: #333; margin-right: 2vw; white-space: nowrap; min-width: 5vw; }
+        .station { font-size: 6.5vw; font-weight: 900; color: #000; letter-spacing: -0.3vw; line-height: 1; white-space: nowrap; }
+
+        /* 言語別フォント */
+        .lang-en .station { font-family: Arial, sans-serif; font-size: 5.5vw; letter-spacing: 0; }
+        .lang-ko .station { font-family: 'Noto Sans KR', sans-serif; font-size: 6vw; letter-spacing: 0; }
+        .lang-zh .station { font-family: 'Noto Sans SC', sans-serif; letter-spacing: 0; }
+
+        /* 右側固定ブロック */
+        .right-info-block {
+            position: absolute; right: 2.5vw; top: 10%; bottom: 12%; width: 11vw;
+            display: flex; flex-direction: column; justify-content: space-between; align-items: center;
+        }
+        .car-num { font-size: 5vw; font-weight: 900; line-height: 0.8; color: #333; }
+        .car-unit { font-size: 1.2vw; font-weight: bold; color: #333; }
+        
+        .station-id-box {
+            border: 0.5vw solid #e2007e; border-radius: 0.8vw;
+            display: flex; flex-direction: column; width: 10vw; overflow: hidden; background: #fff;
+        }
+        .id-line { background: #e2007e; color: white; font-size: 2vw; text-align: center; font-weight: 900; padding: 2px 0; }
+        .id-num { background: white; font-size: 5vw; text-align: center; font-weight: 900; line-height: 1; color: #000; }
+
+        .red-line { height: 12px; background-color: #e2007e; width: 100%; }
+
+        /* 下部エリア */
+        .bottom-white-zone { flex: 1; background-color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .exit-tag {
+            background: #ffb800; color: #000; font-size: 1.8vw; font-weight: bold;
+            padding: 0.1vw 4vw; border: 2.2px solid #444; z-index: 5; margin-bottom: -1px;
+            transition: opacity 0.5s;
+        }
+        .platform-3d { width: 85%; height: 13vw; background: #c0c0c0; clip-path: polygon(8% 0%, 92% 0%, 100% 100%, 0% 100%); border-top: 3px solid #888; }
+        .train-row { display: flex; gap: 0.3vw; margin-top: -4.5vw; z-index: 20; }
+        .car-block { width: 11vw; height: 6vw; background: #fff; border: 3px solid #444; display: flex; justify-content: center; align-items: center; font-size: 3.5vw; font-weight: 900; }
+        .active { background: #eee; border-bottom: 1.2vw solid #0072bc; }
+    </style>
+</head>
+<body>
+    <div id="lcd">
+        <div class="top-gray-zone">
+            <div id="fade-group" class="lang-container">
+                <div class="header-top-row">
+                    <div class="type" id="type">普通</div>
+                    <div class="dest-main" id="dest-main">---</div>
+                </div>
+                <div class="header-bottom-row">
+                    <div class="status" id="status"></div>
+                    <div class="station" id="station">---</div>
+                </div>
+            </div>
+            <div class="right-info-block">
+                <div class="car-info"><div class="car-num" id="car-num">1</div><div class="car-unit" id="unit-car">号車</div></div>
+                <div class="station-id-box">
+                    <div class="id-line" id="l-code">JK</div>
+                    <div class="id-num" id="s-num">04</div>
+                </div>
+            </div>
+        </div>
+        <div class="red-line"></div>
+        <div class="bottom-white-zone">
+            <div class="platform-container" style="display:flex; flex-direction:column; align-items:center; width:100%;">
+                <div class="exit-tag" id="exit-tag">出口</div>
+                <div class="platform-3d"></div>
+                <div class="train-row" id="car-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentLangIdx = 0;
+        let stationData = null; 
+        const langKeys = ['ja_h', 'ja_k', 'en', 'ko', 'zh'];
+        const langConfigs = {
+            ja_h: { status: 'まもなく', type: '普通', for: 'ゆき', car: '号車', exit: '出口', class: '' },
+            ja_k: { status: 'まもなく', type: '普通', for: '方面', car: '号車', exit: '出口', class: '' },
+            en:   { status: 'Arriving at', type: 'Local', for: 'for', car: 'Car', exit: 'Exit', class: 'lang-en' },
+            ko:   { status: '곧', type: '보통', for: '행', car: '호車', exit: '나가는 곳', class: 'lang-ko' },
+            zh:   { status: '即将到达', type: '普通', for: '方向', car: '号车', exit: '出口', class: 'lang-zh' }
+        };
+
+        function update() {
+            const raw = localStorage.getItem('lcd_data');
+            if(!raw) return;
+            stationData = JSON.parse(raw);
+            
+            // 共通部分
+            document.getElementById('l-code').innerText = stationData.line || "JK";
+            document.getElementById('s-num').innerText = stationData.sid || "00";
+            document.getElementById('car-num').innerText = stationData.carNow || "1";
+            
+            let carsHtml = "";
+            for(let i=1; i<=6; i++) {
+                carsHtml += `<div class="car-block ${i==stationData.carNow ? 'active' : ''}">${i}</div>`;
+            }
+            document.getElementById('car-list').innerHTML = carsHtml;
+            
+            syncRender();
+        }
+
+        function syncRender() {
+            if(!stationData) return;
+            const key = langKeys[currentLangIdx];
+            const config = langConfigs[key];
+            
+            const isMamonaku = (stationData.status === "まもなく");
+            const fadeTarget = document.getElementById('fade-group');
+            
+            // フェード効果
+            fadeTarget.style.opacity = 0;
+            document.getElementById('exit-tag').style.opacity = 0;
+            document.getElementById('unit-car').style.opacity = 0;
+
+            setTimeout(() => {
+                const sText = stationData['s_' + key] || stationData['s_ja_h'] || "---";
+                const dText = stationData['d_' + key] || stationData['d_ja_h'] || "---";
+
+                document.getElementById('type').innerText = config.type;
+                document.getElementById('dest-main').innerText = dText + " " + config.for;
+                
+                // 「まもなく」モードの時だけステータス文字を表示
+                document.getElementById('status').innerText = isMamonaku ? config.status : "";
+                
+                document.getElementById('station').innerText = sText;
+                document.getElementById('unit-car').innerText = config.car;
+                document.getElementById('exit-tag').innerText = config.exit;
+
+                fadeTarget.className = "lang-container " + config.class;
+                
+                fadeTarget.style.opacity = 1;
+                document.getElementById('exit-tag').style.opacity = 1;
+                document.getElementById('unit-car').style.opacity = 1;
+            }, 500);
+        }
+
+        // 5秒ごとに多言語サイクルを回す
+        setInterval(() => {
+            currentLangIdx = (currentLangIdx + 1) % langKeys.length;
+            syncRender();
+        }, 5000);
+
+        window.addEventListener('storage', update);
+        update(); 
+    </script>
+</body>
+</html>
